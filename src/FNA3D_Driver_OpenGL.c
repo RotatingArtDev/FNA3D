@@ -5757,15 +5757,42 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	forceCore = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_CORE_PROFILE", 0);
 	forceCompat = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_COMPATIBILITY_PROFILE", 0);
 
-	/* Some platforms are GLES only */
+	/* Check if using gl4es (OpenGL->ES translator) */
+	int useGL4ES = SDL_GetHintBoolean("FNA3D_USE_GL4ES", 0);
+
+	/* Some platforms are GLES only, UNLESS using gl4es
+	 * 
+	 * ⚠️ CRITICAL (gl4es SDL+OpenGL integration):
+	 * 正确方案（基于Gish项目）：
+	 * 
+	 * Gish使用：SDL (OpenGL API) → gl4es → GLES后端
+	 * 
+	 * 关键点：
+	 * 1. gl4es静态链接，提供OpenGL 1.x/2.x API（不是GLES API）
+	 * 2. SDL使用OpenGL后端（SDL_GL_CONTEXT_PROFILE_COMPATIBILITY）
+	 * 3. SDL通过静态链接的符号调用gl4es
+	 * 4. gl4es内部翻译到GLES并调用系统的libGLESv2.so
+	 * 
+	 * 为什么不强制ES3：
+	 * - 我们提供的是OpenGL API，不是GLES API
+	 * - SDL需要OpenGL profile才能调用glBegin/glEnd等
+	 * - gl4es负责翻译到GLES
+	 */
 	osVersion = SDL_GetPlatform();
-	forceES3 |= (
-		(SDL_strcmp(osVersion, "iOS") == 0) ||
-		(SDL_strcmp(osVersion, "tvOS") == 0) ||
-		(SDL_strcmp(osVersion, "Stadia") == 0) ||
-		(SDL_strcmp(osVersion, "Android") == 0) ||
-		(SDL_strcmp(osVersion, "Emscripten") == 0)
-	);
+	if (!useGL4ES) {
+		/* 如果没有使用gl4es，这些平台强制使用ES3 */
+		forceES3 |= (
+			(SDL_strcmp(osVersion, "iOS") == 0) ||
+			(SDL_strcmp(osVersion, "tvOS") == 0) ||
+			(SDL_strcmp(osVersion, "Stadia") == 0) ||
+			(SDL_strcmp(osVersion, "Android") == 0) ||
+			(SDL_strcmp(osVersion, "Emscripten") == 0)
+		);
+	} else if (SDL_strcmp(osVersion, "Android") == 0) {
+		/* Android + gl4es: 使用OpenGL兼容性profile（SDL+OpenGL方案）*/
+		forceCompat = 1;
+		FNA3D_LogInfo("Using gl4es on Android: OpenGL compatibility profile (Gish method)");
+	}
 
 	/* Window depth format */
 	depthSize = 24;
@@ -5839,13 +5866,16 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	 * -flibit
 	 */
 #ifdef USE_SDL3
-	if (!SDL_GL_LoadLibrary(NULL))
-#else
-	if (SDL_GL_LoadLibrary(NULL) < 0)
-#endif
+	if (SDL_GL_LoadLibrary(NULL))
 	{
 		return 0;
 	}
+#else
+	if (SDL_GL_LoadLibrary(NULL) < 0)
+	{
+		return 0;
+	}
+#endif
 
 	*flags = SDL_WINDOW_OPENGL;
 	return 1;
