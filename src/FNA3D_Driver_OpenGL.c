@@ -5757,15 +5757,16 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	forceCore = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_CORE_PROFILE", 0);
 	forceCompat = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_COMPATIBILITY_PROFILE", 0);
 
-	/* Some platforms are GLES only */
-	osVersion = SDL_GetPlatform();
-	forceES3 |= (
-		(SDL_strcmp(osVersion, "iOS") == 0) ||
-		(SDL_strcmp(osVersion, "tvOS") == 0) ||
-		(SDL_strcmp(osVersion, "Stadia") == 0) ||
-		(SDL_strcmp(osVersion, "Android") == 0) ||
-		(SDL_strcmp(osVersion, "Emscripten") == 0)
-	);
+    // well this is not always true...
+//	/* Some platforms are GLES only */
+//	osVersion = SDL_GetPlatform();
+//	forceES3 |= (
+//		(SDL_strcmp(osVersion, "iOS") == 0) ||
+//		(SDL_strcmp(osVersion, "tvOS") == 0) ||
+//		(SDL_strcmp(osVersion, "Stadia") == 0) ||
+//		(SDL_strcmp(osVersion, "Android") == 0) ||
+//		(SDL_strcmp(osVersion, "Emscripten") == 0)
+//	);
 
 	/* Window depth format */
 	depthSize = 24;
