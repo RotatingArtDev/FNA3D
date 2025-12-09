@@ -4640,6 +4640,42 @@ static void OPENGL_SetVertexBufferData(
 
 	/* FIXME: Staging buffer for elementSizeInBytes < vertexStride! */
 
+	const GLsizeiptr updateSize = (GLsizeiptr) (elementCount * vertexStride);
+
+	/* GLES optimization: Use glMapBufferRange to avoid CPU-GPU sync overhead.
+	 * Key: GL_MAP_UNSYNCHRONIZED_BIT for NoOverwrite avoids driver sync.
+	 * Reference: Godot Engine GLES3 rasterizer_canvas_gles3.cpp
+	 */
+	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	{
+		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
+		
+		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
+		{
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* Critical for performance! */
+		}
+		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
+		{
+			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
+		}
+		
+		void* ptr = renderer->glMapBufferRange(
+			GL_ARRAY_BUFFER,
+			(GLintptr) offsetInBytes,
+			updateSize,
+			mapFlags
+		);
+		
+		if (ptr != NULL)
+		{
+			SDL_memcpy(ptr, data, updateSize);
+			renderer->glUnmapBuffer(GL_ARRAY_BUFFER);
+			return;
+		}
+		/* Fall through to glBufferSubData if map failed */
+	}
+	
+	/* Fallback: original FNA3D path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -4653,7 +4689,7 @@ static void OPENGL_SetVertexBufferData(
 	renderer->glBufferSubData(
 		GL_ARRAY_BUFFER,
 		(GLintptr) offsetInBytes,
-		(GLsizeiptr) (elementCount * vertexStride),
+		updateSize,
 		data
 	);
 }
@@ -4824,6 +4860,37 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
+	/* GLES optimization: Use glMapBufferRange (same as VertexBuffer) */
+	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	{
+		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
+		
+		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
+		{
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* Critical for performance! */
+		}
+		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
+		{
+			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
+		}
+		
+		void* ptr = renderer->glMapBufferRange(
+			GL_ELEMENT_ARRAY_BUFFER,
+			(GLintptr) offsetInBytes,
+			(GLsizeiptr) dataLength,
+			mapFlags
+		);
+		
+		if (ptr != NULL)
+		{
+			SDL_memcpy(ptr, data, dataLength);
+			renderer->glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+			return;
+		}
+		/* Fall through if map failed */
+	}
+
+	/* Fallback: original FNA3D path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -5306,7 +5373,12 @@ static uint8_t OPENGL_SupportsHardwareInstancing(FNA3D_Renderer *driverData)
 
 static uint8_t OPENGL_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 {
-	return 0;
+	/* NoOverwrite is supported on OpenGL ES 3.0+ and desktop OpenGL 3.0+
+	 * It enables ring buffer optimization for dynamic vertex/index buffers.
+	 * This is critical for SpriteBatch performance on mobile GLES.
+	 * We use glBufferSubData with SetDataOptions.NoOverwrite to avoid orphaning.
+	 */
+	return 1;
 }
 
 static uint8_t OPENGL_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)

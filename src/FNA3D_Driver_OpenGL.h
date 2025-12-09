@@ -282,6 +282,11 @@ typedef unsigned char	GLboolean;
 #define GL_DEBUG_SEVERITY_LOW				0x9148
 #define GL_DEBUG_SEVERITY_NOTIFICATION  		0x826B
 
+/* Buffer map flags */
+#define GL_MAP_WRITE_BIT				0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT			0x0004
+#define GL_MAP_UNSYNCHRONIZED_BIT			0x0020
+
 /* In case this needs to be exported in a certain way... */
 #ifdef _WIN32 /* Windows OpenGL uses stdcall */
 #define GLAPIENTRY __stdcall
