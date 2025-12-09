@@ -4642,9 +4642,10 @@ static void OPENGL_SetVertexBufferData(
 
 	const GLsizeiptr updateSize = (GLsizeiptr) (elementCount * vertexStride);
 
-	/* GLES optimization: Use glMapBufferRange to avoid CPU-GPU sync overhead.
-	 * Key: GL_MAP_UNSYNCHRONIZED_BIT for NoOverwrite avoids driver sync.
-	 * Reference: Godot Engine GLES3 rasterizer_canvas_gles3.cpp
+#ifdef USE_ES3
+	/* GLES3 optimization: Use glMapBufferRange to avoid CPU-GPU sync overhead.
+	 * GL_MAP_UNSYNCHRONIZED_BIT is critical for NoOverwrite (ring buffer) performance.
+	 * Desktop OpenGL doesn't benefit from this, so keep GLES3-only.
 	 */
 	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
@@ -4652,11 +4653,11 @@ static void OPENGL_SetVertexBufferData(
 		
 		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
 		{
-			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* Critical for performance! */
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* No sync - huge speedup! */
 		}
 		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
-			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
+			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;  /* Invalidate old data */
 		}
 		
 		void* ptr = renderer->glMapBufferRange(
@@ -4674,8 +4675,9 @@ static void OPENGL_SetVertexBufferData(
 		}
 		/* Fall through to glBufferSubData if map failed */
 	}
+#endif
 	
-	/* Fallback: original FNA3D path */
+	/* Fallback: standard glBufferData/glBufferSubData path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -4860,14 +4862,15 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
-	/* GLES optimization: Use glMapBufferRange (same as VertexBuffer) */
+#ifdef USE_ES3
+	/* GLES3 optimization: Use glMapBufferRange for index buffers too */
 	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
 		
 		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
 		{
-			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* Critical for performance! */
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
 		}
 		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
@@ -4889,8 +4892,9 @@ static void OPENGL_SetIndexBufferData(
 		}
 		/* Fall through if map failed */
 	}
+#endif
 
-	/* Fallback: original FNA3D path */
+	/* Fallback: standard path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -5373,12 +5377,17 @@ static uint8_t OPENGL_SupportsHardwareInstancing(FNA3D_Renderer *driverData)
 
 static uint8_t OPENGL_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 {
-	/* NoOverwrite is supported on OpenGL ES 3.0+ and desktop OpenGL 3.0+
-	 * It enables ring buffer optimization for dynamic vertex/index buffers.
-	 * This is critical for SpriteBatch performance on mobile GLES.
-	 * We use glBufferSubData with SetDataOptions.NoOverwrite to avoid orphaning.
+	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	
+	/* NoOverwrite (ring buffer optimization) is critical for GLES3 SpriteBatch performance.
+	 * On desktop OpenGL, keep disabled as drivers handle buffer updates differently.
+	 * GLES3 benefits greatly from avoiding frequent glBufferData orphaning.
 	 */
-	return 1;
+	#ifdef USE_ES3
+	return 1;  /* Enable for GLES3 only */
+	#else
+	return 0;  /* Keep disabled for desktop OpenGL */
+	#endif
 }
 
 static uint8_t OPENGL_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
@@ -5829,16 +5838,15 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	forceCore = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_CORE_PROFILE", 0);
 	forceCompat = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_COMPATIBILITY_PROFILE", 0);
 
-    // well this is not always true...
-//	/* Some platforms are GLES only */
-//	osVersion = SDL_GetPlatform();
-//	forceES3 |= (
-//		(SDL_strcmp(osVersion, "iOS") == 0) ||
-//		(SDL_strcmp(osVersion, "tvOS") == 0) ||
-//		(SDL_strcmp(osVersion, "Stadia") == 0) ||
-//		(SDL_strcmp(osVersion, "Android") == 0) ||
-//		(SDL_strcmp(osVersion, "Emscripten") == 0)
-//	);
+	/* Some platforms are GLES only */
+	osVersion = SDL_GetPlatform();
+	forceES3 |= (
+		(SDL_strcmp(osVersion, "iOS") == 0) ||
+		(SDL_strcmp(osVersion, "tvOS") == 0) ||
+		(SDL_strcmp(osVersion, "Stadia") == 0) ||
+		(SDL_strcmp(osVersion, "Android") == 0) ||
+		(SDL_strcmp(osVersion, "Emscripten") == 0)
+	);
 
 	/* Window depth format */
 	depthSize = 24;

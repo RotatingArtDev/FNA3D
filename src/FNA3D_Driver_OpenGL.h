@@ -232,6 +232,13 @@ typedef unsigned char	GLboolean;
 #define GL_STATIC_DRAW  				0x88E4
 #define GL_MAX_VERTEX_ATTRIBS				0x8869
 
+/* Buffer map flags (GLES3 optimization) */
+#ifdef USE_ES3
+#define GL_MAP_WRITE_BIT				0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT			0x0004
+#define GL_MAP_UNSYNCHRONIZED_BIT			0x0020
+#endif
+
 /* Render targets */
 #define GL_FRAMEBUFFER  				0x8D40
 #define GL_READ_FRAMEBUFFER				0x8CA8
@@ -281,11 +288,6 @@ typedef unsigned char	GLboolean;
 #define GL_DEBUG_SEVERITY_MEDIUM			0x9147
 #define GL_DEBUG_SEVERITY_LOW				0x9148
 #define GL_DEBUG_SEVERITY_NOTIFICATION  		0x826B
-
-/* Buffer map flags */
-#define GL_MAP_WRITE_BIT				0x0002
-#define GL_MAP_INVALIDATE_RANGE_BIT			0x0004
-#define GL_MAP_UNSYNCHRONIZED_BIT			0x0020
 
 /* In case this needs to be exported in a certain way... */
 #ifdef _WIN32 /* Windows OpenGL uses stdcall */
