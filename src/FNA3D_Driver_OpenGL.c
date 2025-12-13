@@ -4642,12 +4642,12 @@ static void OPENGL_SetVertexBufferData(
 
 	const GLsizeiptr updateSize = (GLsizeiptr) (elementCount * vertexStride);
 
-#ifdef USE_ES3
 	/* GLES3 optimization: Use glMapBufferRange to avoid CPU-GPU sync overhead.
 	 * GL_MAP_UNSYNCHRONIZED_BIT is critical for NoOverwrite (ring buffer) performance.
 	 * Desktop OpenGL doesn't benefit from this, so keep GLES3-only.
+	 * Controlled by environment variable FNA3D_OPENGL_USE_MAP_BUFFER_RANGE (default: enabled for GLES3)
 	 */
-	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (renderer->useES3 && renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
 		
@@ -4675,7 +4675,6 @@ static void OPENGL_SetVertexBufferData(
 		}
 		/* Fall through to glBufferSubData if map failed */
 	}
-#endif
 	
 	/* Fallback: standard glBufferData/glBufferSubData path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
@@ -4862,9 +4861,8 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
-#ifdef USE_ES3
 	/* GLES3 optimization: Use glMapBufferRange for index buffers too */
-	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (renderer->useES3 && renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
 		
@@ -4892,7 +4890,6 @@ static void OPENGL_SetIndexBufferData(
 		}
 		/* Fall through if map failed */
 	}
-#endif
 
 	/* Fallback: standard path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
@@ -5382,12 +5379,9 @@ static uint8_t OPENGL_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 	/* NoOverwrite (ring buffer optimization) is critical for GLES3 SpriteBatch performance.
 	 * On desktop OpenGL, keep disabled as drivers handle buffer updates differently.
 	 * GLES3 benefits greatly from avoiding frequent glBufferData orphaning.
+	 * Controlled by renderer->useES3 (set via FNA3D_OPENGL_FORCE_ES3 environment variable)
 	 */
-	#ifdef USE_ES3
-	return 1;  /* Enable for GLES3 only */
-	#else
-	return 0;  /* Keep disabled for desktop OpenGL */
-	#endif
+	return renderer->useES3 ? 1 : 0;
 }
 
 static uint8_t OPENGL_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
