@@ -4647,7 +4647,7 @@ static void OPENGL_SetVertexBufferData(
 	 * Desktop OpenGL doesn't benefit from this, so keep GLES3-only.
 	 * Controlled by environment variable FNA3D_OPENGL_USE_MAP_BUFFER_RANGE (default: enabled for GLES3)
 	 */
-	if (renderer->useES3 && renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
 		
@@ -4862,7 +4862,7 @@ static void OPENGL_SetIndexBufferData(
 	BindIndexBuffer(renderer, glBuffer->handle);
 
 	/* GLES3 optimization: Use glMapBufferRange for index buffers too */
-	if (renderer->useES3 && renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
 		
@@ -5379,9 +5379,10 @@ static uint8_t OPENGL_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 	/* NoOverwrite (ring buffer optimization) is critical for GLES3 SpriteBatch performance.
 	 * On desktop OpenGL, keep disabled as drivers handle buffer updates differently.
 	 * GLES3 benefits greatly from avoiding frequent glBufferData orphaning.
-	 * Controlled by renderer->useES3 (set via FNA3D_OPENGL_FORCE_ES3 environment variable)
+	 * Controlled by renderer->supports_ARB_map_buffer_range
 	 */
-	return renderer->useES3 ? 1 : 0;
+    // TODO: maybe add another env var to control this separately from map_buffer_range?
+	return renderer->supports_ARB_map_buffer_range;
 }
 
 static uint8_t OPENGL_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
@@ -5832,15 +5833,16 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	forceCore = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_CORE_PROFILE", 0);
 	forceCompat = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_COMPATIBILITY_PROFILE", 0);
 
-	/* Some platforms are GLES only */
-	osVersion = SDL_GetPlatform();
-	forceES3 |= (
-		(SDL_strcmp(osVersion, "iOS") == 0) ||
-		(SDL_strcmp(osVersion, "tvOS") == 0) ||
-		(SDL_strcmp(osVersion, "Stadia") == 0) ||
-		(SDL_strcmp(osVersion, "Android") == 0) ||
-		(SDL_strcmp(osVersion, "Emscripten") == 0)
-	);
+    // Well this is not always true...
+//	/* Some platforms are GLES only */
+//	osVersion = SDL_GetPlatform();
+//	forceES3 |= (
+//		(SDL_strcmp(osVersion, "iOS") == 0) ||
+//		(SDL_strcmp(osVersion, "tvOS") == 0) ||
+//		(SDL_strcmp(osVersion, "Stadia") == 0) ||
+//		(SDL_strcmp(osVersion, "Android") == 0) ||
+//		(SDL_strcmp(osVersion, "Emscripten") == 0)
+//	);
 
 	/* Window depth format */
 	depthSize = 24;
@@ -5974,8 +5976,10 @@ FNA3D_Device* OPENGL_CreateDevice(
 	renderer->useCoreProfile = (flags & SDL_GL_CONTEXT_PROFILE_CORE) != 0;
 
 	/* Check for EGL-based contexts */
-	renderer->isEGL = (	renderer->useES3 ||
-				SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0	);
+    // This is not always true, e.g. on Android we have EGL but not Wayland
+//	renderer->isEGL = (	renderer->useES3 ||
+//				SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0	);
+    renderer->isEGL = 1;
 
 	/* Check for a possible debug context */
 	SDL_GL_GetAttribute(SDL_GL_CONTEXT_FLAGS, &flags);
