@@ -6074,6 +6074,15 @@ FNA3D_Device* OPENGL_CreateDevice(
 	);
 	LoadEntryPoints(renderer, driverInfo, debugMode);
 
+	/* Check environment variable to disable glMapBufferRange optimization */
+	/* This is needed for Vulkan-translated renderers (zink, angle, gl4es+angle) */
+	const char *useMapBufferRange = SDL_getenv("FNA3D_OPENGL_USE_MAP_BUFFER_RANGE");
+	if (useMapBufferRange != NULL && SDL_strcmp(useMapBufferRange, "0") == 0)
+	{
+		renderer->supports_ARB_map_buffer_range = 0;
+		FNA3D_LogInfo("glMapBufferRange optimization disabled via FNA3D_OPENGL_USE_MAP_BUFFER_RANGE=0");
+	}
+
 	/* Initialize shader context */
 	renderer->shaderProfile = SDL_GetHint("FNA3D_MOJOSHADER_PROFILE");
 	if (renderer->shaderProfile == NULL || renderer->shaderProfile[0] == '\0')
