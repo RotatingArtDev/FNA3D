@@ -151,9 +151,6 @@ GL_PROC(ARB_internalformat_query, void, glGetInternalformativ, (GLenum a, GLenum
 /* This is mostly needed by ES3, where loads/stores are a huge slowdown */
 GL_PROC(ARB_invalidate_subdata, void, glInvalidateFramebuffer, (GLenum a, GLsizei b, const GLenum *c))
 
-/* Buffer mapping for GLES3 optimization */
-GL_PROC_EXT(ARB_map_buffer_range, EXT, GLvoid*, glMapBufferRange, (GLenum a, GLintptr b, GLsizeiptr c, GLbitfield d))
-
 /* Hardware instancing is nice to have, but isn't used all the time */
 GL_PROC(ARB_draw_instanced, void, glDrawElementsInstanced, (GLenum a, GLsizei b, GLenum c, const GLvoid *d, GLsizei e))
 GL_PROC(ARB_instanced_arrays, void, glVertexAttribDivisor, (GLuint a, GLuint b))
@@ -171,6 +168,9 @@ GL_PROC(EXT_draw_buffers2, void, glColorMaski, (GLuint a, GLboolean b, GLboolean
 
 /* Probably used by nobody, honestly */
 GL_PROC(ARB_texture_multisample, void, glSampleMaski, (GLuint a, GLuint b))
+
+/* Technically UnmapBuffer is core, but useless without MapBufferRange */
+GL_PROC_EXT(ARB_map_buffer_range, EXT, GLvoid*, glMapBufferRange, (GLenum a, GLintptr b, GLsizeiptr c, GLbitfield d))
 
 /* "NOTE: when implemented in an OpenGL ES context, all entry points defined
  * by this extension must have a "KHR" suffix. When implemented in an

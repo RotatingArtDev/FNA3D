@@ -4640,43 +4640,23 @@ static void OPENGL_SetVertexBufferData(
 
 	/* FIXME: Staging buffer for elementSizeInBytes < vertexStride! */
 
-	const GLsizeiptr updateSize = (GLsizeiptr) (elementCount * vertexStride);
-
-	/* GLES3 optimization: Use glMapBufferRange to avoid CPU-GPU sync overhead.
-	 * GL_MAP_UNSYNCHRONIZED_BIT is critical for NoOverwrite (ring buffer) performance.
-	 * Desktop OpenGL doesn't benefit from this, so keep GLES3-only.
-	 * Controlled by environment variable FNA3D_OPENGL_USE_MAP_BUFFER_RANGE (default: enabled for GLES3)
-	 */
-	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (	options == FNA3D_SETDATAOPTIONS_NOOVERWRITE &&
+		renderer->supports_ARB_map_buffer_range	)
 	{
-		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
-		
-		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
-		{
-			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;  /* No sync - huge speedup! */
-		}
-		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
-		{
-			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;  /* Invalidate old data */
-		}
-		
-		void* ptr = renderer->glMapBufferRange(
+		void *ptr = renderer->glMapBufferRange(
 			GL_ARRAY_BUFFER,
 			(GLintptr) offsetInBytes,
-			updateSize,
-			mapFlags
+			(GLsizeiptr) (elementCount * vertexStride),
+			GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT
 		);
-		
 		if (ptr != NULL)
 		{
-			SDL_memcpy(ptr, data, updateSize);
+			SDL_memcpy(ptr, data, (elementCount * vertexStride));
 			renderer->glUnmapBuffer(GL_ARRAY_BUFFER);
-			return;
 		}
-		/* Fall through to glBufferSubData if map failed */
+		return;
 	}
-	
-	/* Fallback: standard glBufferData/glBufferSubData path */
+
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -4690,7 +4670,7 @@ static void OPENGL_SetVertexBufferData(
 	renderer->glBufferSubData(
 		GL_ARRAY_BUFFER,
 		(GLintptr) offsetInBytes,
-		updateSize,
+		(GLsizeiptr) (elementCount * vertexStride),
 		data
 	);
 }
@@ -4861,37 +4841,23 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
-	/* GLES3 optimization: Use glMapBufferRange for index buffers too */
-	if (renderer->supports_ARB_map_buffer_range && renderer->glMapBufferRange != NULL)
+	if (	options == FNA3D_SETDATAOPTIONS_NOOVERWRITE &&
+		renderer->supports_ARB_map_buffer_range	)
 	{
-		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
-		
-		if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
-		{
-			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
-		}
-		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
-		{
-			mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
-		}
-		
-		void* ptr = renderer->glMapBufferRange(
+		void *ptr = renderer->glMapBufferRange(
 			GL_ELEMENT_ARRAY_BUFFER,
 			(GLintptr) offsetInBytes,
 			(GLsizeiptr) dataLength,
-			mapFlags
+			GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT
 		);
-		
 		if (ptr != NULL)
 		{
 			SDL_memcpy(ptr, data, dataLength);
 			renderer->glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
-			return;
 		}
-		/* Fall through if map failed */
+		return;
 	}
 
-	/* Fallback: standard path */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -5375,13 +5341,6 @@ static uint8_t OPENGL_SupportsHardwareInstancing(FNA3D_Renderer *driverData)
 static uint8_t OPENGL_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 {
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
-	
-	/* NoOverwrite (ring buffer optimization) is critical for GLES3 SpriteBatch performance.
-	 * On desktop OpenGL, keep disabled as drivers handle buffer updates differently.
-	 * GLES3 benefits greatly from avoiding frequent glBufferData orphaning.
-	 * Controlled by renderer->supports_ARB_map_buffer_range
-	 */
-    // TODO: maybe add another env var to control this separately from map_buffer_range?
 	return renderer->supports_ARB_map_buffer_range;
 }
 
