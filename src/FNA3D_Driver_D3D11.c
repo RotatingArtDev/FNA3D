@@ -53,8 +53,8 @@
 #define D3D11_DLL	"libdxvk_d3d11.0.dylib"
 #define DXGI_DLL	"libdxvk_dxgi.0.dylib"
 #else
-#define D3D11_DLL	"libdxvk_d3d11.so.0"
-#define DXGI_DLL	"libdxvk_dxgi.so.0"
+#define D3D11_DLL	"libdxvk_d3d11.so"
+#define DXGI_DLL	"libdxvk_dxgi.so"
 #endif
 
 #include <dxgi.h>
@@ -5198,16 +5198,31 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 		D3D_FEATURE_LEVEL_10_0
 	};
 	HRESULT res;
+#ifdef FNA3D_DXVK_NATIVE
+	/* For DXVK Native (Android), use feature levels that are more compatible
+	 * with mobile Vulkan. Starting from 11_0 avoids crashes when 11_1 fails
+	 * and DXVK tries to reinitialize. */
+	D3D_FEATURE_LEVEL dxvk_levels[] =
+	{
+		D3D_FEATURE_LEVEL_11_0,
+		D3D_FEATURE_LEVEL_10_1,
+		D3D_FEATURE_LEVEL_10_0
+	};
+#endif
 
 	const uint32_t driverType = SDL_GetHintBoolean("FNA3D_D3D11_USE_WARP", SDL_FALSE)
 		? D3D_DRIVER_TYPE_WARP
 		: D3D_DRIVER_TYPE_HARDWARE;
 
+	FNA3D_LogInfo("D3D11: PrepareWindowAttributes called");
+
 #ifdef FNA3D_DXVK_NATIVE
 	const char *forceDriver = SDL_GetHint("FNA3D_FORCE_DRIVER");
+	FNA3D_LogInfo("D3D11: DXVK Native mode, FNA3D_FORCE_DRIVER=%s", forceDriver ? forceDriver : "(null)");
 	if ((forceDriver == NULL) || (SDL_strcmp(forceDriver, "D3D11") != 0))
 	{
 		/* We only use DXVK when explicitly ordered to do so -flibit */
+		FNA3D_LogInfo("D3D11: Skipping - FNA3D_FORCE_DRIVER not set to D3D11");
 		return 0;
 	}
 #ifdef USE_SDL3
@@ -5215,9 +5230,11 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 #else
 	SDL_setenv("DXVK_WSI_DRIVER", "SDL2", 1);
 #endif
+	FNA3D_LogInfo("D3D11: DXVK_WSI_DRIVER set to SDL2");
 #endif /* FNA3D_DXVK_NATIVE */
 
 	/* Check to see if we can compile HLSL */
+	FNA3D_LogInfo("D3D11: Creating MojoShader D3D11 context...");
 	shaderContext = MOJOSHADER_d3d11CreateContext(
 		NULL,
 		NULL,
@@ -5227,15 +5244,20 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 	);
 	if (shaderContext == NULL)
 	{
+		FNA3D_LogError("D3D11: MojoShader D3D11 context creation failed!");
 		return 0;
 	}
+	FNA3D_LogInfo("D3D11: MojoShader D3D11 context created successfully");
 	MOJOSHADER_d3d11DestroyContext(shaderContext);
 
+	FNA3D_LogInfo("D3D11: Loading %s...", D3D11_DLL);
 	module = SDL_LoadObject(D3D11_DLL);
 	if (module == NULL)
 	{
+		FNA3D_LogError("D3D11: Failed to load %s: %s", D3D11_DLL, SDL_GetError());
 		return 0;
 	}
+	FNA3D_LogInfo("D3D11: %s loaded successfully", D3D11_DLL);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 	D3D11CreateDeviceFunc = (PFN_D3D11_CREATE_DEVICE) SDL_LoadFunction(
@@ -5249,6 +5271,26 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 		return 0;
 	}
 
+#ifdef FNA3D_DXVK_NATIVE
+	/* For DXVK Native, use the DXVK-specific feature levels to avoid
+	 * crashes caused by failed D3D11_FEATURE_LEVEL_11_1 initialization.
+	 * DXVK's Config singleton can get corrupted if the first call fails. */
+	FNA3D_LogInfo("D3D11: DXVK Native - Using feature levels 11_0, 10_1, 10_0");
+	FNA3D_LogInfo("D3D11: Calling D3D11CreateDevice with HARDWARE driver type");
+	res = D3D11CreateDeviceFunc(
+		NULL,
+		driverType,
+		NULL,
+		D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+		dxvk_levels,
+		SDL_arraysize(dxvk_levels),
+		D3D11_SDK_VERSION,
+		NULL,
+		NULL,
+		NULL
+	);
+	FNA3D_LogInfo("D3D11: D3D11CreateDevice returned HRESULT: 0x%08X", res);
+#else
 	res = D3D11CreateDeviceFunc(
 		NULL,
 		driverType,
@@ -5278,6 +5320,7 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 			NULL
 		);
 	}
+#endif /* FNA3D_DXVK_NATIVE */
 
 	SDL_UnloadObject(module);
 

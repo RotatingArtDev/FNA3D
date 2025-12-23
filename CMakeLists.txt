@@ -38,11 +38,14 @@ elseif(WIN32)
 	# "FNA3D.dll", not "libFNA3D.dll"
 	set(CMAKE_SHARED_LIBRARY_PREFIX "")
 else()
-	find_package(PkgConfig)
-	if(PKG_CONFIG_FOUND)
-		pkg_search_module(DXVK_NATIVE dxvk-dxgi)
-		if(DXVK_NATIVE_FOUND)
-			set(BUILD_DXVK_NATIVE ON)
+	# 如果父级 CMakeLists.txt 已经设置了 BUILD_DXVK_NATIVE，则使用它
+	if(NOT BUILD_DXVK_NATIVE)
+		find_package(PkgConfig)
+		if(PKG_CONFIG_FOUND)
+			pkg_search_module(DXVK_NATIVE dxvk-dxgi)
+			if(DXVK_NATIVE_FOUND)
+				set(BUILD_DXVK_NATIVE ON)
+			endif()
 		endif()
 	endif()
 endif()
@@ -76,11 +79,15 @@ if (MOJOSHADER_STATIC_SPIRVCROSS)
 	add_definitions(-DSDL_GPU_SHADERCROSS_STATIC)
 endif()
 
+message(STATUS "FNA3D: BUILD_DXVK_NATIVE = ${BUILD_DXVK_NATIVE}")
+message(STATUS "FNA3D: WIN32 = ${WIN32}")
 if(WIN32 OR BUILD_DXVK_NATIVE)
+	message(STATUS "FNA3D: Enabling D3D11 driver (DXVK Native or Windows)")
 	add_definitions(
 		-DFNA3D_DRIVER_D3D11
 	)
 else()
+	message(STATUS "FNA3D: Disabling HLSL profile (not Windows/DXVK)")
 	add_definitions(
 		-DSUPPORT_PROFILE_HLSL=0
 	)

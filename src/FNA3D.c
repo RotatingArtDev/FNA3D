@@ -147,6 +147,13 @@ uint32_t FNA3D_PrepareWindowAttributes(void)
 	const char *hint = SDL_GetHint("FNA3D_FORCE_DRIVER");
 	const char *gpuhint;
 
+	/* Also check environment variable if SDL hint is not set */
+	if (hint == NULL)
+	{
+		hint = SDL_getenv("FNA3D_FORCE_DRIVER");
+	}
+	FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: FNA3D_FORCE_DRIVER=%s", hint ? hint : "(null)");
+
 	/* We used to have our own Vulkan renderer, but that work is now in SDL
 	 * instead. For maximum compatibility, alias this to SDL_GPU!
 	 *
