@@ -50,12 +50,18 @@ else()
 	endif()
 endif()
 
+# Options for native Vulkan driver
+option(BUILD_NATIVE_VULKAN "Build native Vulkan driver" OFF)
+
 # Defines
 add_definitions(
 	-DFNA3D_DRIVER_OPENGL
 )
 if(BUILD_SDL3)
 	add_definitions(-DFNA3D_DRIVER_SDL)
+endif()
+if(BUILD_NATIVE_VULKAN)
+	add_definitions(-DFNA3D_DRIVER_VULKAN)
 endif()
 add_definitions(
 	-DMOJOSHADER_NO_VERSION_INCLUDE
@@ -115,16 +121,39 @@ add_library(FNA3D
 	src/FNA3D_Driver.h
 	src/FNA3D_Driver_OpenGL.h
 	src/FNA3D_Driver_OpenGL_glfuncs.h
+	src/FNA3D_Driver_Vulkan.h
+	src/FNA3D_Driver_Vulkan_Impl.h
 	src/FNA3D_PipelineCache.h
 	# Source Files
 	src/FNA3D.c
 	src/FNA3D_Driver_D3D11.c
 	src/FNA3D_Driver_OpenGL.c
 	src/FNA3D_Driver_SDL.c
+	src/FNA3D_Driver_Vulkan.c
 	src/FNA3D_Image.c
 	src/FNA3D_PipelineCache.c
 	src/FNA3D_Tracing.c
 )
+
+# Find and link Vulkan for native Vulkan driver
+if(BUILD_NATIVE_VULKAN)
+	if(ANDROID)
+		# Android NDK provides Vulkan headers and library
+		find_library(VULKAN_LIB vulkan)
+		if(VULKAN_LIB)
+			target_link_libraries(FNA3D PRIVATE ${VULKAN_LIB})
+			message(STATUS "Found Vulkan library: ${VULKAN_LIB}")
+		else()
+			message(WARNING "Vulkan library not found, native Vulkan driver may not work")
+		endif()
+	else()
+		find_package(Vulkan)
+		if(Vulkan_FOUND)
+			target_link_libraries(FNA3D PRIVATE Vulkan::Vulkan)
+			target_include_directories(FNA3D PRIVATE ${Vulkan_INCLUDE_DIRS})
+		endif()
+	endif()
+endif()
 add_library(mojoshader STATIC
 	MojoShader/mojoshader.c
 	MojoShader/mojoshader_effects.c

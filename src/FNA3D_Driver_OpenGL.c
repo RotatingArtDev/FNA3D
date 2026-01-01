@@ -4639,24 +4639,50 @@ static void OPENGL_SetVertexBufferData(
 	BindVertexBuffer(renderer, glBuffer->handle);
 
 	/* FIXME: Staging buffer for elementSizeInBytes < vertexStride! */
+	
+	const GLsizeiptr dataSize = (GLsizeiptr) (elementCount * vertexStride);
 
-	if (	options == FNA3D_SETDATAOPTIONS_NOOVERWRITE &&
-		renderer->supports_ARB_map_buffer_range	)
+	if (renderer->supports_ARB_map_buffer_range)
 	{
+		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
+		
+		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
+		{
+			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL)
+			 * 这避免了额外的内存分配和 GPU 同步 */
+			if (offsetInBytes == 0 && dataSize >= glBuffer->size)
+			{
+				/* 完全覆盖整个缓冲区 */
+				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
+			}
+			else
+			{
+				/* 只覆盖部分区域 */
+				mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
+			}
+		}
+		else if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
+		{
+			/* 不覆盖现有数据，使用无同步映射 */
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
+		}
+		
 		void *ptr = renderer->glMapBufferRange(
 			GL_ARRAY_BUFFER,
 			(GLintptr) offsetInBytes,
-			(GLsizeiptr) (elementCount * vertexStride),
-			GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT
+			dataSize,
+			mapFlags
 		);
 		if (ptr != NULL)
 		{
-			SDL_memcpy(ptr, data, (elementCount * vertexStride));
+			SDL_memcpy(ptr, data, dataSize);
 			renderer->glUnmapBuffer(GL_ARRAY_BUFFER);
+			return;
 		}
-		return;
+		/* 如果映射失败，回退到传统方法 */
 	}
 
+	/* 传统方法（不支持 map_buffer_range 或映射失败时的回退） */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(
@@ -4670,7 +4696,7 @@ static void OPENGL_SetVertexBufferData(
 	renderer->glBufferSubData(
 		GL_ARRAY_BUFFER,
 		(GLintptr) offsetInBytes,
-		(GLsizeiptr) (elementCount * vertexStride),
+		dataSize,
 		data
 	);
 }
@@ -4841,23 +4867,45 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
-	if (	options == FNA3D_SETDATAOPTIONS_NOOVERWRITE &&
-		renderer->supports_ARB_map_buffer_range	)
+	const GLsizeiptr dataSize = (GLsizeiptr) dataLength;
+
+	if (renderer->supports_ARB_map_buffer_range)
 	{
+		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
+		
+		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
+		{
+			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL) */
+			if (offsetInBytes == 0 && dataSize >= glBuffer->size)
+			{
+				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
+			}
+			else
+			{
+				mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
+			}
+		}
+		else if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
+		{
+			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
+		}
+		
 		void *ptr = renderer->glMapBufferRange(
 			GL_ELEMENT_ARRAY_BUFFER,
 			(GLintptr) offsetInBytes,
-			(GLsizeiptr) dataLength,
-			GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT
+			dataSize,
+			mapFlags
 		);
 		if (ptr != NULL)
 		{
-			SDL_memcpy(ptr, data, dataLength);
+			SDL_memcpy(ptr, data, dataSize);
 			renderer->glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+			return;
 		}
-		return;
+		/* 映射失败时回退到传统方法 */
 	}
 
+	/* 传统方法 */
 	if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 	{
 		renderer->glBufferData(

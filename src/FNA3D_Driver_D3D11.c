@@ -52,6 +52,13 @@
 #elif defined(__APPLE__)
 #define D3D11_DLL	"libdxvk_d3d11.0.dylib"
 #define DXGI_DLL	"libdxvk_dxgi.0.dylib"
+#elif defined(__ANDROID__)
+/* Android uses unversioned .so files */
+#define D3D11_DLL	"libdxvk_d3d11.so"
+#define DXGI_DLL	"libdxvk_dxgi.so"
+/* Android: Allow specifying full path via environment variables */
+#define D3D11_DLL_PATH_ENV	"DXVK_D3D11_PATH"
+#define DXGI_DLL_PATH_ENV	"DXVK_DXGI_PATH"
 #else
 #define D3D11_DLL	"libdxvk_d3d11.so"
 #define DXGI_DLL	"libdxvk_dxgi.so"
@@ -5210,6 +5217,8 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 	};
 #endif
 
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Starting...");
+
 	const uint32_t driverType = SDL_GetHintBoolean("FNA3D_D3D11_USE_WARP", SDL_FALSE)
 		? D3D_DRIVER_TYPE_WARP
 		: D3D_DRIVER_TYPE_HARDWARE;
@@ -5218,11 +5227,19 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 
 #ifdef FNA3D_DXVK_NATIVE
 	const char *forceDriver = SDL_GetHint("FNA3D_FORCE_DRIVER");
+<<<<<<< Updated upstream
 	FNA3D_LogInfo("D3D11: DXVK Native mode, FNA3D_FORCE_DRIVER=%s", forceDriver ? forceDriver : "(null)");
 	if ((forceDriver == NULL) || (SDL_strcmp(forceDriver, "D3D11") != 0))
 	{
 		/* We only use DXVK when explicitly ordered to do so -flibit */
 		FNA3D_LogInfo("D3D11: Skipping - FNA3D_FORCE_DRIVER not set to D3D11");
+=======
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: FNA3D_DXVK_NATIVE defined, forceDriver=%s", forceDriver ? forceDriver : "(null)");
+	if ((forceDriver == NULL) || (SDL_strcmp(forceDriver, "D3D11") != 0))
+	{
+		/* We only use DXVK when explicitly ordered to do so -flibit */
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: forceDriver is not D3D11, returning 0");
+>>>>>>> Stashed changes
 		return 0;
 	}
 #ifdef USE_SDL3
@@ -5230,11 +5247,22 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 #else
 	SDL_setenv("DXVK_WSI_DRIVER", "SDL2", 1);
 #endif
+<<<<<<< Updated upstream
 	FNA3D_LogInfo("D3D11: DXVK_WSI_DRIVER set to SDL2");
 #endif /* FNA3D_DXVK_NATIVE */
 
 	/* Check to see if we can compile HLSL */
 	FNA3D_LogInfo("D3D11: Creating MojoShader D3D11 context...");
+=======
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: DXVK_WSI_DRIVER set");
+#else
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: FNA3D_DXVK_NATIVE NOT defined");
+#endif /* FNA3D_DXVK_NATIVE */
+
+#ifndef __ANDROID__
+	/* Check to see if we can compile HLSL - skip on Android as DXVK provides D3D11 */
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Creating MojoShader D3D11 context...");
+>>>>>>> Stashed changes
 	shaderContext = MOJOSHADER_d3d11CreateContext(
 		NULL,
 		NULL,
@@ -5244,20 +5272,60 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 	);
 	if (shaderContext == NULL)
 	{
+<<<<<<< Updated upstream
 		FNA3D_LogError("D3D11: MojoShader D3D11 context creation failed!");
 		return 0;
 	}
 	FNA3D_LogInfo("D3D11: MojoShader D3D11 context created successfully");
+=======
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: MojoShader context creation failed, returning 0");
+		return 0;
+	}
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: MojoShader context created successfully");
+>>>>>>> Stashed changes
 	MOJOSHADER_d3d11DestroyContext(shaderContext);
+#else
+	/* On Android, DXVK provides D3D11 - skip MojoShader pre-check */
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Skipping MojoShader pre-check on Android (DXVK provides D3D11)");
+	(void) shaderContext; /* Suppress unused variable warning */
+#endif
 
+<<<<<<< Updated upstream
 	FNA3D_LogInfo("D3D11: Loading %s...", D3D11_DLL);
+=======
+#ifdef __ANDROID__
+	/* On Android, try environment variable path first */
+	{
+		const char *d3d11_path = SDL_getenv(D3D11_DLL_PATH_ENV);
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: DXVK_D3D11_PATH=%s", d3d11_path ? d3d11_path : "(null)");
+		if (d3d11_path != NULL)
+		{
+			FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Loading D3D11 from env path: %s", d3d11_path);
+			module = SDL_LoadObject(d3d11_path);
+		}
+		else
+		{
+			FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Loading D3D11 from default: %s", D3D11_DLL);
+			module = SDL_LoadObject(D3D11_DLL);
+		}
+	}
+#else
+>>>>>>> Stashed changes
 	module = SDL_LoadObject(D3D11_DLL);
+#endif
 	if (module == NULL)
 	{
+<<<<<<< Updated upstream
 		FNA3D_LogError("D3D11: Failed to load %s: %s", D3D11_DLL, SDL_GetError());
 		return 0;
 	}
 	FNA3D_LogInfo("D3D11: %s loaded successfully", D3D11_DLL);
+=======
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Failed to load D3D11 library, SDL error: %s", SDL_GetError());
+		return 0;
+	}
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: D3D11 library loaded successfully");
+>>>>>>> Stashed changes
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 	D3D11CreateDeviceFunc = (PFN_D3D11_CREATE_DEVICE) SDL_LoadFunction(
@@ -5267,9 +5335,11 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 #pragma GCC diagnostic pop
 	if (D3D11CreateDeviceFunc == NULL)
 	{
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Failed to get D3D11CreateDevice function");
 		SDL_UnloadObject(module);
 		return 0;
 	}
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: Got D3D11CreateDevice function");
 
 #ifdef FNA3D_DXVK_NATIVE
 	/* For DXVK Native, use the DXVK-specific feature levels to avoid
@@ -5303,6 +5373,7 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 		NULL,
 		NULL
 	);
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: D3D11CreateDevice returned 0x%08X", res);
 
 	if (FAILED(res))
 	{
@@ -5319,6 +5390,7 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 			NULL,
 			NULL
 		);
+		FNA3D_LogInfo("D3D11_PrepareWindowAttributes: D3D11CreateDevice (lower level) returned 0x%08X", res);
 	}
 #endif /* FNA3D_DXVK_NATIVE */
 
@@ -5329,6 +5401,7 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 		FNA3D_LogWarn("D3D11 is unsupported! Error Code: %08X", res);
 		return 0;
 	}
+	FNA3D_LogInfo("D3D11_PrepareWindowAttributes: D3D11 device creation succeeded!");
 
 	/* No window flags required */
 #if SDL_MAJOR_VERSION < 3
@@ -5534,7 +5607,21 @@ static FNA3D_Device* D3D11_CreateDevice(
 	SDL_memset(renderer, '\0', sizeof(D3D11Renderer));
 
 	/* Load DXGI... */
+#ifdef __ANDROID__
+	{
+		const char *dxgi_path = SDL_getenv(DXGI_DLL_PATH_ENV);
+		if (dxgi_path != NULL)
+		{
+			renderer->dxgi_dll = SDL_LoadObject(dxgi_path);
+		}
+		else
+		{
+			renderer->dxgi_dll = SDL_LoadObject(DXGI_DLL);
+		}
+	}
+#else
 	renderer->dxgi_dll = SDL_LoadObject(DXGI_DLL);
+#endif
 	if (renderer->dxgi_dll == NULL)
 	{
 		FNA3D_LogError("Could not find " DXGI_DLL);
@@ -5613,7 +5700,21 @@ static FNA3D_Device* D3D11_CreateDevice(
 	IDXGIAdapter1_GetDesc1(renderer->adapter, &adapterDesc);
 
 	/* Load D3D11CreateDevice */
+#ifdef __ANDROID__
+	{
+		const char *d3d11_path = SDL_getenv(D3D11_DLL_PATH_ENV);
+		if (d3d11_path != NULL)
+		{
+			renderer->d3d11_dll = SDL_LoadObject(d3d11_path);
+		}
+		else
+		{
+			renderer->d3d11_dll = SDL_LoadObject(D3D11_DLL);
+		}
+	}
+#else
 	renderer->d3d11_dll = SDL_LoadObject(D3D11_DLL);
+#endif
 	if (renderer->d3d11_dll == NULL)
 	{
 		FNA3D_LogError("Could not find " D3D11_DLL);
@@ -5705,6 +5806,7 @@ try_create_device:
 	FNA3D_LogInfo("D3D11 Adapter: %S", adapterDesc.Description);
 
 	/* Initialize MojoShader context */
+	FNA3D_LogInfo("D3D11_CreateDevice: Creating MojoShader context with device=%p, context=%p", renderer->device, renderer->context);
 	renderer->shaderContext = MOJOSHADER_d3d11CreateContext(
 		renderer->device,
 		renderer->context,
@@ -5712,6 +5814,16 @@ try_create_device:
 		NULL,
 		renderer
 	);
+	if (renderer->shaderContext == NULL)
+	{
+		const char *err = MOJOSHADER_d3d11GetError(NULL);
+		FNA3D_LogError("D3D11_CreateDevice: Failed to create MojoShader context! Error: %s", err ? err : "(unknown)");
+		/* Don't return NULL here - try to continue, the error might be recoverable */
+	}
+	else
+	{
+		FNA3D_LogInfo("D3D11_CreateDevice: MojoShader context created successfully: %p", renderer->shaderContext);
+	}
 
 	/* Initialize texture and sampler collections */
 	for (i = 0; i < MAX_TOTAL_SAMPLERS; i += 1)

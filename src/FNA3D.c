@@ -40,6 +40,9 @@
 /* Drivers */
 
 static const FNA3D_Driver *drivers[] = {
+#if FNA3D_DRIVER_VULKAN
+	&VulkanDriver,
+#endif
 #if FNA3D_DRIVER_SDL
 	&SDLGPUDriver,
 #endif
@@ -194,19 +197,25 @@ uint32_t FNA3D_PrepareWindowAttributes(void)
 	}
 #endif
 
+	FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: hint=%s, iterating drivers...", hint ? hint : "(null)");
 	for (i = 0; drivers[i] != NULL; i += 1)
 	{
+		FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Checking driver[%d]=%s", i, drivers[i]->Name);
 		if (hint != NULL)
 		{
 			if (SDL_strcasecmp(hint, drivers[i]->Name) != 0)
 			{
+				FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Driver %s skipped (hint mismatch)", drivers[i]->Name);
 				continue;
 			}
 		}
+		FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Calling PrepareWindowAttributes for %s", drivers[i]->Name);
 		if (drivers[i]->PrepareWindowAttributes(&result))
 		{
+			FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Driver %s succeeded!", drivers[i]->Name);
 			break;
 		}
+		FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Driver %s failed", drivers[i]->Name);
 	}
 	if (drivers[i] == NULL)
 	{
@@ -215,6 +224,7 @@ uint32_t FNA3D_PrepareWindowAttributes(void)
 	else
 	{
 		selectedDriver = i;
+		FNA3D_LogInfo("FNA3D_PrepareWindowAttributes: Selected driver: %s", drivers[selectedDriver]->Name);
 	}
 	return result;
 }

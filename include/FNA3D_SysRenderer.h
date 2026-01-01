@@ -27,6 +27,11 @@
 #ifndef FNA3D_SYSRENDERER_H
 #define FNA3D_SYSRENDERER_H
 
+/* Include Vulkan types if Vulkan driver is enabled */
+#if FNA3D_DRIVER_VULKAN
+#include <vulkan/vulkan.h>
+#endif /* FNA3D_DRIVER_VULKAN */
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */

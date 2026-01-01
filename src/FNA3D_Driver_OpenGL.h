@@ -233,7 +233,11 @@ typedef unsigned char	GLboolean;
 #define GL_MAX_VERTEX_ATTRIBS				0x8869
 
 /* NoOverwrite Uploads */
+#define GL_MAP_READ_BIT					0x0001
 #define GL_MAP_WRITE_BIT				0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT			0x0004
+#define GL_MAP_INVALIDATE_BUFFER_BIT			0x0008
+#define GL_MAP_FLUSH_EXPLICIT_BIT			0x0010
 #define GL_MAP_UNSYNCHRONIZED_BIT			0x0020
 
 /* Render targets */

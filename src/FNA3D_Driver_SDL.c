@@ -33,7 +33,15 @@
 
 #define MAX_FRAMES_IN_FLIGHT 3
 #define MAX_UPLOAD_CYCLE_COUNT 4
+
+/* Transfer buffer size - 可通过环境变量调整
+ * 移动设备建议: 8 MiB (内存受限)
+ * 桌面设备建议: 16-32 MiB (更大的纹理上传) */
+#ifdef __ANDROID__
+#define TRANSFER_BUFFER_SIZE 8388608 /* 8 MiB - 移动设备优化 */
+#else
 #define TRANSFER_BUFFER_SIZE 16777216 /* 16 MiB */
+#endif
 
 static inline SDL_GPUSampleCount XNAToSDL_SampleCount(int32_t sampleCount)
 {
