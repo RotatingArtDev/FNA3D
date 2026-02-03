@@ -316,6 +316,17 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	OpenGLQuery *disposeQueries;
 	SDL_Mutex *disposeQueriesLock;
 
+	/* Quality Settings (from environment variables) */
+	float qualityLodBias;        /* FNA3D_TEXTURE_LOD_BIAS: additional LOD bias (0-4) */
+	int32_t qualityMaxAnisotropy; /* FNA3D_MAX_ANISOTROPY: max anisotropy limit (1-16) */
+	float qualityRenderScale;    /* FNA3D_RENDER_SCALE: render resolution scale (0.5-1.0) */
+	uint8_t qualityLowPrecision; /* FNA3D_SHADER_LOW_PRECISION: use low precision shaders */
+
+	/* Frame Rate Limiting */
+	int32_t targetFps;           /* FNA3D_TARGET_FPS: target frame rate (0 = unlimited) */
+	uint64_t frameStartTime;     /* Start time of current frame */
+	uint64_t targetFrameTime;    /* Target time per frame in nanoseconds */
+
 	/* GL entry points */
 	glfntype_glGetString glGetString; /* Loaded early! */
 	#define GL_EXT(ext) \
@@ -1451,6 +1462,34 @@ static void OPENGL_SwapBuffers(
 		SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
 	}
 
+	/* Frame rate limiting */
+	if (renderer->targetFps > 0 && renderer->targetFrameTime > 0)
+	{
+		uint64_t currentTime = SDL_GetPerformanceCounter();
+		uint64_t frequency = SDL_GetPerformanceFrequency();
+		
+		if (renderer->frameStartTime > 0)
+		{
+			/* Calculate elapsed time in nanoseconds */
+			uint64_t elapsedTicks = currentTime - renderer->frameStartTime;
+			uint64_t elapsedNs = (elapsedTicks * 1000000000ULL) / frequency;
+			
+			/* Sleep if we're ahead of schedule */
+			if (elapsedNs < renderer->targetFrameTime)
+			{
+				uint64_t sleepNs = renderer->targetFrameTime - elapsedNs;
+				uint32_t sleepMs = (uint32_t)(sleepNs / 1000000ULL);
+				if (sleepMs > 0)
+				{
+					SDL_Delay(sleepMs);
+				}
+			}
+		}
+		
+		/* Record frame start time for next frame */
+		renderer->frameStartTime = SDL_GetPerformanceCounter();
+	}
+
 	/* Run any threaded commands */
 	ExecuteCommands(renderer);
 
@@ -2349,6 +2388,14 @@ static void OPENGL_VerifySampler(
 	{
 		tex->filter = sampler->filter;
 		tex->anisotropy = (float) sampler->maxAnisotropy;
+
+		/* Apply quality limit to anisotropy */
+		float effectiveAnisotropy = tex->anisotropy;
+		if (renderer->qualityMaxAnisotropy < 16 && effectiveAnisotropy > (float) renderer->qualityMaxAnisotropy)
+		{
+			effectiveAnisotropy = (float) renderer->qualityMaxAnisotropy;
+		}
+
 		renderer->glTexParameteri(
 			tex->target,
 			GL_TEXTURE_MAG_FILTER,
@@ -2367,7 +2414,7 @@ static void OPENGL_VerifySampler(
 				tex->target,
 				GL_TEXTURE_MAX_ANISOTROPY_EXT,
 				(tex->filter == FNA3D_TEXTUREFILTER_ANISOTROPIC) ?
-					SDL_max(tex->anisotropy, 1.0f) :
+					SDL_max(effectiveAnisotropy, 1.0f) :
 					1.0f
 			);
 		}
@@ -2384,10 +2431,12 @@ static void OPENGL_VerifySampler(
 	if (sampler->mipMapLevelOfDetailBias != tex->lodBias && !renderer->useES3)
 	{
 		tex->lodBias = sampler->mipMapLevelOfDetailBias;
+		/* Apply additional LOD bias from quality settings */
+		float effectiveLodBias = tex->lodBias + renderer->qualityLodBias;
 		renderer->glTexParameterf(
 			tex->target,
 			GL_TEXTURE_LOD_BIAS,
-			tex->lodBias
+			effectiveLodBias
 		);
 	}
 
@@ -3566,10 +3615,12 @@ static inline OpenGLTexture* OPENGL_INTERNAL_CreateTexture(
 	);
 	if (!renderer->useES3)
 	{
+		/* Apply additional LOD bias from quality settings */
+		float effectiveLodBias = result->lodBias + renderer->qualityLodBias;
 		renderer->glTexParameterf(
 			result->target,
 			GL_TEXTURE_LOD_BIAS,
-			result->lodBias
+			effectiveLodBias
 		);
 	}
 	return result;
@@ -6045,6 +6096,86 @@ FNA3D_Device* OPENGL_CreateDevice(
 		renderer->supports_ARB_map_buffer_range = 0;
 		FNA3D_LogInfo("glMapBufferRange optimization disabled via FNA3D_OPENGL_USE_MAP_BUFFER_RANGE=0");
 	}
+
+	/* Quality Settings - Read from environment variables */
+	/* FNA3D_TEXTURE_LOD_BIAS: Additional LOD bias for textures (reduces texture quality, improves performance) */
+	const char *lodBiasStr = SDL_getenv("FNA3D_TEXTURE_LOD_BIAS");
+	if (lodBiasStr != NULL)
+	{
+		renderer->qualityLodBias = (float) SDL_atof(lodBiasStr);
+		if (renderer->qualityLodBias < 0.0f) renderer->qualityLodBias = 0.0f;
+		if (renderer->qualityLodBias > 4.0f) renderer->qualityLodBias = 4.0f;
+		FNA3D_LogInfo("Quality: Texture LOD Bias = %.2f", renderer->qualityLodBias);
+	}
+	else
+	{
+		renderer->qualityLodBias = 0.0f;
+	}
+
+	/* FNA3D_MAX_ANISOTROPY: Limit max anisotropic filtering (1 = disabled, 16 = full quality) */
+	const char *maxAnisotropyStr = SDL_getenv("FNA3D_MAX_ANISOTROPY");
+	if (maxAnisotropyStr != NULL)
+	{
+		renderer->qualityMaxAnisotropy = SDL_atoi(maxAnisotropyStr);
+		if (renderer->qualityMaxAnisotropy < 1) renderer->qualityMaxAnisotropy = 1;
+		if (renderer->qualityMaxAnisotropy > 16) renderer->qualityMaxAnisotropy = 16;
+		FNA3D_LogInfo("Quality: Max Anisotropy = %d", renderer->qualityMaxAnisotropy);
+	}
+	else
+	{
+		renderer->qualityMaxAnisotropy = 16; /* No limit by default */
+	}
+
+	/* FNA3D_RENDER_SCALE: Render at lower resolution then upscale (0.5-1.0) */
+	const char *renderScaleStr = SDL_getenv("FNA3D_RENDER_SCALE");
+	if (renderScaleStr != NULL)
+	{
+		renderer->qualityRenderScale = (float) SDL_atof(renderScaleStr);
+		if (renderer->qualityRenderScale < 0.25f) renderer->qualityRenderScale = 0.25f;
+		if (renderer->qualityRenderScale > 1.0f) renderer->qualityRenderScale = 1.0f;
+		FNA3D_LogInfo("Quality: Render Scale = %.2f", renderer->qualityRenderScale);
+	}
+	else
+	{
+		renderer->qualityRenderScale = 1.0f; /* Full resolution by default */
+	}
+
+	/* FNA3D_SHADER_LOW_PRECISION: Use low precision shaders (mediump instead of highp) */
+	const char *lowPrecisionStr = SDL_getenv("FNA3D_SHADER_LOW_PRECISION");
+	if (lowPrecisionStr != NULL && SDL_strcmp(lowPrecisionStr, "1") == 0)
+	{
+		renderer->qualityLowPrecision = 1;
+		FNA3D_LogInfo("Quality: Low Precision Shaders = Enabled");
+	}
+	else
+	{
+		renderer->qualityLowPrecision = 0;
+	}
+
+	/* FNA3D_TARGET_FPS: Frame rate limiting (0 = unlimited, 30, 45, 60, etc.) */
+	const char *targetFpsStr = SDL_getenv("FNA3D_TARGET_FPS");
+	if (targetFpsStr != NULL)
+	{
+		renderer->targetFps = SDL_atoi(targetFpsStr);
+		if (renderer->targetFps > 0)
+		{
+			renderer->targetFrameTime = 1000000000ULL / (uint64_t) renderer->targetFps;
+			FNA3D_LogInfo("Frame Rate Limit: %d FPS (%.2f ms/frame)", 
+				renderer->targetFps, 1000.0f / renderer->targetFps);
+		}
+		else
+		{
+			renderer->targetFps = 0;
+			renderer->targetFrameTime = 0;
+			FNA3D_LogInfo("Frame Rate Limit: Unlimited");
+		}
+	}
+	else
+	{
+		renderer->targetFps = 0;
+		renderer->targetFrameTime = 0;
+	}
+	renderer->frameStartTime = 0;
 
 	/* Initialize shader context */
 	renderer->shaderProfile = SDL_GetHint("FNA3D_MOJOSHADER_PROFILE");
