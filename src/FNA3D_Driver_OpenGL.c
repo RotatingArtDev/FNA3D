@@ -327,6 +327,44 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	uint64_t frameStartTime;     /* Start time of current frame */
 	uint64_t targetFrameTime;    /* Target time per frame in nanoseconds */
 
+	/* Runtime GL performance diagnostics */
+	uint8_t perfDiagnosticsEnabled; /* RAL_GL_DIAGNOSTICS: 1 = enabled */
+	uint64_t perfPublishTimestamp;
+	uint64_t perfMapWrites;
+	uint64_t perfMapBytes;
+	uint64_t perfSubDataWrites;
+	uint64_t perfSubDataBytes;
+	uint64_t perfDrawCalls;
+	uint64_t perfFrameCount;
+	uint64_t perfSwapWaitNs;
+	uint64_t perfSleepNs;
+	uint64_t perfDrawIndexedCalls;
+	uint64_t perfDrawInstancedCalls;
+	uint64_t perfDrawPrimitiveCalls;
+	uint64_t perfClearCalls;
+	uint64_t perfSetRenderTargetCalls;
+	uint64_t perfApplyEffectCalls;
+	uint64_t perfVertexUploadCalls;
+	uint64_t perfIndexUploadCalls;
+	uint64_t perfVertexUploadBytes;
+	uint64_t perfIndexUploadBytes;
+	uint64_t perfTotalMapWrites;
+	uint64_t perfTotalMapBytes;
+	uint64_t perfTotalSubDataWrites;
+	uint64_t perfTotalSubDataBytes;
+	uint64_t perfTotalDrawCalls;
+	uint64_t perfTotalFrameCount;
+	uint64_t perfTotalDrawIndexedCalls;
+	uint64_t perfTotalDrawInstancedCalls;
+	uint64_t perfTotalDrawPrimitiveCalls;
+	uint64_t perfTotalClearCalls;
+	uint64_t perfTotalSetRenderTargetCalls;
+	uint64_t perfTotalApplyEffectCalls;
+	uint64_t perfTotalVertexUploadCalls;
+	uint64_t perfTotalIndexUploadCalls;
+	uint64_t perfTotalVertexUploadBytes;
+	uint64_t perfTotalIndexUploadBytes;
+
 	/* GL entry points */
 	glfntype_glGetString glGetString; /* Loaded early! */
 	#define GL_EXT(ext) \
@@ -1316,6 +1354,234 @@ static inline void DisposeResources(OpenGLRenderer *renderer)
 	#undef DISPOSE
 }
 
+static void OPENGL_PublishPerfDiagnostics(OpenGLRenderer *renderer)
+{
+	uint64_t now;
+	uint64_t frequency;
+	uint64_t elapsedTicks;
+	uint64_t totalWrites;
+	uint64_t frameCount;
+	double vertexUploadMbWindow;
+	double indexUploadMbWindow;
+	double vertexUploadMbTotal;
+	double indexUploadMbTotal;
+	double elapsedSeconds;
+	double mapWritesPerSecond;
+	double subDataWritesPerSecond;
+	double drawCallsPerSecond;
+	double drawCallsPerFrame;
+	double totalUploadMbPerSecond;
+	double avgFrameMs;
+	double avgSwapMs;
+	double avgSleepMs;
+	double mapRatio;
+	const char *uploadPath;
+	char buffer[128];
+
+	if (!renderer->perfDiagnosticsEnabled)
+	{
+		return;
+	}
+
+	now = SDL_GetPerformanceCounter();
+	if (renderer->perfPublishTimestamp == 0)
+	{
+		renderer->perfPublishTimestamp = now;
+		return;
+	}
+
+	frequency = SDL_GetPerformanceFrequency();
+	elapsedTicks = now - renderer->perfPublishTimestamp;
+	if (elapsedTicks < (frequency / 4))
+	{
+		/* Update about every 250ms to keep overhead tiny. */
+		return;
+	}
+
+	elapsedSeconds = (double) elapsedTicks / (double) frequency;
+	if (elapsedSeconds <= 0.0)
+	{
+		return;
+	}
+
+	mapWritesPerSecond = (double) renderer->perfMapWrites / elapsedSeconds;
+	subDataWritesPerSecond = (double) renderer->perfSubDataWrites / elapsedSeconds;
+	drawCallsPerSecond = (double) renderer->perfDrawCalls / elapsedSeconds;
+	totalUploadMbPerSecond =
+		((double) (renderer->perfMapBytes + renderer->perfSubDataBytes) / (1024.0 * 1024.0)) /
+		elapsedSeconds;
+	frameCount = renderer->perfFrameCount;
+	if (frameCount > 0)
+	{
+		drawCallsPerFrame = (double) renderer->perfDrawCalls / (double) frameCount;
+		avgFrameMs = (elapsedSeconds * 1000.0) / (double) frameCount;
+		avgSwapMs = ((double) renderer->perfSwapWaitNs / 1000000.0) / (double) frameCount;
+		avgSleepMs = ((double) renderer->perfSleepNs / 1000000.0) / (double) frameCount;
+	}
+	else
+	{
+		drawCallsPerFrame = 0.0;
+		avgFrameMs = 0.0;
+		avgSwapMs = 0.0;
+		avgSleepMs = 0.0;
+	}
+	vertexUploadMbWindow = (double) renderer->perfVertexUploadBytes / (1024.0 * 1024.0);
+	indexUploadMbWindow = (double) renderer->perfIndexUploadBytes / (1024.0 * 1024.0);
+	vertexUploadMbTotal = (double) renderer->perfTotalVertexUploadBytes / (1024.0 * 1024.0);
+	indexUploadMbTotal = (double) renderer->perfTotalIndexUploadBytes / (1024.0 * 1024.0);
+
+	totalWrites = renderer->perfMapWrites + renderer->perfSubDataWrites;
+	if (totalWrites == 0)
+	{
+		uploadPath = renderer->supports_ARB_map_buffer_range ? "MapBufferRange (idle)" : "BufferSubData (idle)";
+		mapRatio = renderer->supports_ARB_map_buffer_range ? 100.0 : 0.0;
+	}
+	else if (renderer->perfMapWrites == 0)
+	{
+		uploadPath = "BufferSubData";
+		mapRatio = 0.0;
+	}
+	else if (renderer->perfSubDataWrites == 0)
+	{
+		uploadPath = "MapBufferRange";
+		mapRatio = 100.0;
+	}
+	else
+	{
+		uploadPath = "Mixed";
+		mapRatio = ((double) renderer->perfMapWrites * 100.0) / (double) totalWrites;
+	}
+
+	SDL_setenv("RAL_GL_MAP_ENABLED", renderer->supports_ARB_map_buffer_range ? "1" : "0", 1);
+	SDL_setenv("RAL_GL_UPLOAD_PATH", uploadPath, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", mapWritesPerSecond);
+	SDL_setenv("RAL_GL_MAP_WRITES_S", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", subDataWritesPerSecond);
+	SDL_setenv("RAL_GL_SUBDATA_WRITES_S", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", drawCallsPerSecond);
+	SDL_setenv("RAL_GL_DRAW_S", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.2f", totalUploadMbPerSecond);
+	SDL_setenv("RAL_GL_UPLOAD_MB_S", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", drawCallsPerFrame);
+	SDL_setenv("RAL_GL_DRAWS_FRAME", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.2f", avgFrameMs);
+	SDL_setenv("RAL_GL_FRAME_MS", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.2f", avgSwapMs);
+	SDL_setenv("RAL_GL_SWAP_MS", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.2f", avgSleepMs);
+	SDL_setenv("RAL_GL_SLEEP_MS", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", mapRatio);
+	SDL_setenv("RAL_GL_MAP_RATIO", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"Draw %.0f/s (%.0f/f) Upload %.2fMB/s",
+		drawCallsPerSecond,
+		drawCallsPerFrame,
+		totalUploadMbPerSecond
+	);
+	SDL_setenv("RAL_GL_DIAG", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"Frame %.1fms Swap %.1fms Sleep %.1fms",
+		avgFrameMs,
+		avgSwapMs,
+		avgSleepMs
+	);
+	SDL_setenv("RAL_GL_TIMING", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"Path %s (Map %.0f%%)",
+		uploadPath,
+		mapRatio
+	);
+	SDL_setenv("RAL_GL_PATH", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"W DI %llu IS %llu AR %llu CL %llu RT %llu FX %llu",
+		(unsigned long long) renderer->perfDrawIndexedCalls,
+		(unsigned long long) renderer->perfDrawInstancedCalls,
+		(unsigned long long) renderer->perfDrawPrimitiveCalls,
+		(unsigned long long) renderer->perfClearCalls,
+		(unsigned long long) renderer->perfSetRenderTargetCalls,
+		(unsigned long long) renderer->perfApplyEffectCalls
+	);
+	SDL_setenv("RAL_GL_COUNT_W", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"W MAP %llu SUB %llu VB %llu/%.2fMB IB %llu/%.2fMB",
+		(unsigned long long) renderer->perfMapWrites,
+		(unsigned long long) renderer->perfSubDataWrites,
+		(unsigned long long) renderer->perfVertexUploadCalls,
+		vertexUploadMbWindow,
+		(unsigned long long) renderer->perfIndexUploadCalls,
+		indexUploadMbWindow
+	);
+	SDL_setenv("RAL_GL_UPLOAD_W", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"T D %llu CL %llu RT %llu FX %llu",
+		(unsigned long long) renderer->perfTotalDrawCalls,
+		(unsigned long long) renderer->perfTotalClearCalls,
+		(unsigned long long) renderer->perfTotalSetRenderTargetCalls,
+		(unsigned long long) renderer->perfTotalApplyEffectCalls
+	);
+	SDL_setenv("RAL_GL_COUNT_T", buffer, 1);
+
+	SDL_snprintf(
+		buffer,
+		sizeof(buffer),
+		"T MAP %llu SUB %llu VB %llu/%.1fMB IB %llu/%.1fMB",
+		(unsigned long long) renderer->perfTotalMapWrites,
+		(unsigned long long) renderer->perfTotalSubDataWrites,
+		(unsigned long long) renderer->perfTotalVertexUploadCalls,
+		vertexUploadMbTotal,
+		(unsigned long long) renderer->perfTotalIndexUploadCalls,
+		indexUploadMbTotal
+	);
+	SDL_setenv("RAL_GL_UPLOAD_T", buffer, 1);
+
+	renderer->perfMapWrites = 0;
+	renderer->perfMapBytes = 0;
+	renderer->perfSubDataWrites = 0;
+	renderer->perfSubDataBytes = 0;
+	renderer->perfDrawCalls = 0;
+	renderer->perfFrameCount = 0;
+	renderer->perfSwapWaitNs = 0;
+	renderer->perfSleepNs = 0;
+	renderer->perfDrawIndexedCalls = 0;
+	renderer->perfDrawInstancedCalls = 0;
+	renderer->perfDrawPrimitiveCalls = 0;
+	renderer->perfClearCalls = 0;
+	renderer->perfSetRenderTargetCalls = 0;
+	renderer->perfApplyEffectCalls = 0;
+	renderer->perfVertexUploadCalls = 0;
+	renderer->perfIndexUploadCalls = 0;
+	renderer->perfVertexUploadBytes = 0;
+	renderer->perfIndexUploadBytes = 0;
+	renderer->perfPublishTimestamp = now;
+}
+
 static void OPENGL_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,
@@ -1324,7 +1590,12 @@ static void OPENGL_SwapBuffers(
 ) {
 	int32_t srcX, srcY, srcW, srcH;
 	int32_t dstX, dstY, dstW, dstH;
+	uint64_t perfFrequency;
+	uint64_t swapStart;
+	uint64_t swapEnd;
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+
+	perfFrequency = renderer->perfDiagnosticsEnabled ? SDL_GetPerformanceFrequency() : 0;
 
 	/* Only the faux-backbuffer supports presenting
 	 * specific regions given to Present().
@@ -1452,14 +1723,42 @@ static void OPENGL_SwapBuffers(
 			renderer->glEnable(GL_SCISSOR_TEST);
 		}
 
-		SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+		if (renderer->perfDiagnosticsEnabled)
+		{
+			swapStart = SDL_GetPerformanceCounter();
+			SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+			swapEnd = SDL_GetPerformanceCounter();
+			renderer->perfSwapWaitNs +=
+				((swapEnd - swapStart) * 1000000000ULL) / perfFrequency;
+		}
+		else
+		{
+			SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+		}
 
 		BindFramebuffer(renderer, renderer->backbuffer->opengl.handle);
 	}
 	else
 	{
 		/* Nothing left to do, just swap! */
-		SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+		if (renderer->perfDiagnosticsEnabled)
+		{
+			swapStart = SDL_GetPerformanceCounter();
+			SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+			swapEnd = SDL_GetPerformanceCounter();
+			renderer->perfSwapWaitNs +=
+				((swapEnd - swapStart) * 1000000000ULL) / perfFrequency;
+		}
+		else
+		{
+			SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+		}
+	}
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfFrameCount += 1;
+		renderer->perfTotalFrameCount += 1;
 	}
 
 	/* Frame rate limiting */
@@ -1483,12 +1782,18 @@ static void OPENGL_SwapBuffers(
 				{
 					SDL_Delay(sleepMs);
 				}
+				if (renderer->perfDiagnosticsEnabled)
+				{
+					renderer->perfSleepNs += sleepNs;
+				}
 			}
 		}
 		
 		/* Record frame start time for next frame */
 		renderer->frameStartTime = SDL_GetPerformanceCounter();
 	}
+
+	OPENGL_PublishPerfDiagnostics(renderer);
 
 	/* Run any threaded commands */
 	ExecuteCommands(renderer);
@@ -1509,6 +1814,12 @@ static void OPENGL_Clear(
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
 	uint8_t clearTarget, clearDepth, clearStencil;
 	GLenum clearMask;
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfClearCalls += 1;
+		renderer->perfTotalClearCalls += 1;
+	}
 
 	/* glClear depends on the scissor rectangle! */
 	if (renderer->scissorTestEnable)
@@ -1665,6 +1976,14 @@ static void OPENGL_DrawIndexedPrimitives(
 		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
 	}
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfDrawCalls += 1;
+		renderer->perfTotalDrawCalls += 1;
+		renderer->perfDrawIndexedCalls += 1;
+		renderer->perfTotalDrawIndexedCalls += 1;
+	}
 }
 
 static void OPENGL_DrawInstancedPrimitives(
@@ -1725,6 +2044,14 @@ static void OPENGL_DrawInstancedPrimitives(
 		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
 	}
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfDrawCalls += 1;
+		renderer->perfTotalDrawCalls += 1;
+		renderer->perfDrawInstancedCalls += 1;
+		renderer->perfTotalDrawInstancedCalls += 1;
+	}
 }
 
 static void OPENGL_DrawPrimitives(
@@ -1755,6 +2082,14 @@ static void OPENGL_DrawPrimitives(
 	{
 		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
+	}
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfDrawCalls += 1;
+		renderer->perfTotalDrawCalls += 1;
+		renderer->perfDrawPrimitiveCalls += 1;
+		renderer->perfTotalDrawPrimitiveCalls += 1;
 	}
 }
 
@@ -2628,6 +2963,12 @@ static void OPENGL_SetRenderTargets(
 	FNA3D_RenderTargetBinding *rt;
 	int32_t i;
 	GLuint handle;
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfSetRenderTargetCalls += 1;
+		renderer->perfTotalSetRenderTargetCalls += 1;
+	}
 
 	/* Bind the right framebuffer, if needed */
 	if (numRenderTargets <= 0)
@@ -4690,18 +5031,18 @@ static void OPENGL_SetVertexBufferData(
 	BindVertexBuffer(renderer, glBuffer->handle);
 
 	/* FIXME: Staging buffer for elementSizeInBytes < vertexStride! */
-	
-	const GLsizeiptr dataSize = (GLsizeiptr) (elementCount * vertexStride);
+
+	const GLsizeiptr dataLength = elementCount * vertexStride;
 
 	if (renderer->supports_ARB_map_buffer_range)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
-		
+
 		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
 			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL)
 			 * 这避免了额外的内存分配和 GPU 同步 */
-			if (offsetInBytes == 0 && dataSize >= glBuffer->size)
+			if (offsetInBytes == 0 && dataLength >= glBuffer->size)
 			{
 				/* 完全覆盖整个缓冲区 */
 				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
@@ -4717,17 +5058,28 @@ static void OPENGL_SetVertexBufferData(
 			/* 不覆盖现有数据，使用无同步映射 */
 			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
 		}
-		
+
 		void *ptr = renderer->glMapBufferRange(
-			GL_ARRAY_BUFFER,
-			(GLintptr) offsetInBytes,
-			dataSize,
-			mapFlags
+                GL_ARRAY_BUFFER,
+                (GLintptr) offsetInBytes,
+                dataLength,
+                mapFlags
 		);
 		if (ptr != NULL)
 		{
-			SDL_memcpy(ptr, data, dataSize);
+			SDL_memcpy(ptr, data, dataLength);
 			renderer->glUnmapBuffer(GL_ARRAY_BUFFER);
+            if (renderer->perfDiagnosticsEnabled)
+            {
+                renderer->perfMapWrites += 1;
+                renderer->perfMapBytes += dataLength;
+                renderer->perfTotalMapWrites += 1;
+                renderer->perfTotalMapBytes += dataLength;
+                renderer->perfVertexUploadCalls += 1;
+                renderer->perfVertexUploadBytes += dataLength;
+                renderer->perfTotalVertexUploadCalls += 1;
+                renderer->perfTotalVertexUploadBytes += dataLength;
+            }
 			return;
 		}
 		/* 如果映射失败，回退到传统方法 */
@@ -4745,11 +5097,22 @@ static void OPENGL_SetVertexBufferData(
 	}
 
 	renderer->glBufferSubData(
-		GL_ARRAY_BUFFER,
-		(GLintptr) offsetInBytes,
-		dataSize,
-		data
+            GL_ARRAY_BUFFER,
+            (GLintptr) offsetInBytes,
+            dataLength,
+            data
 	);
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfSubDataWrites += 1;
+		renderer->perfSubDataBytes += dataLength;
+		renderer->perfTotalSubDataWrites += 1;
+		renderer->perfTotalSubDataBytes += dataLength;
+		renderer->perfVertexUploadCalls += 1;
+		renderer->perfVertexUploadBytes += dataLength;
+		renderer->perfTotalVertexUploadCalls += 1;
+		renderer->perfTotalVertexUploadBytes += dataLength;
+	}
 }
 
 static void OPENGL_GetVertexBufferData(
@@ -4918,16 +5281,14 @@ static void OPENGL_SetIndexBufferData(
 
 	BindIndexBuffer(renderer, glBuffer->handle);
 
-	const GLsizeiptr dataSize = (GLsizeiptr) dataLength;
-
 	if (renderer->supports_ARB_map_buffer_range)
 	{
 		GLbitfield mapFlags = GL_MAP_WRITE_BIT;
-		
+
 		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
 			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL) */
-			if (offsetInBytes == 0 && dataSize >= glBuffer->size)
+			if (offsetInBytes == 0 && dataLength >= glBuffer->size)
 			{
 				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
 			}
@@ -4940,17 +5301,28 @@ static void OPENGL_SetIndexBufferData(
 		{
 			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
 		}
-		
+
 		void *ptr = renderer->glMapBufferRange(
 			GL_ELEMENT_ARRAY_BUFFER,
 			(GLintptr) offsetInBytes,
-			dataSize,
+            dataLength,
 			mapFlags
 		);
 		if (ptr != NULL)
 		{
-			SDL_memcpy(ptr, data, dataSize);
+			SDL_memcpy(ptr, data, dataLength);
 			renderer->glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+            if (renderer->perfDiagnosticsEnabled)
+            {
+                renderer->perfMapWrites += 1;
+                renderer->perfMapBytes += dataLength;
+                renderer->perfTotalMapWrites += 1;
+                renderer->perfTotalMapBytes += dataLength;
+                renderer->perfIndexUploadCalls += 1;
+                renderer->perfIndexUploadBytes += dataLength;
+                renderer->perfTotalIndexUploadCalls += 1;
+                renderer->perfTotalIndexUploadBytes += dataLength;
+            }
 			return;
 		}
 		/* 映射失败时回退到传统方法 */
@@ -4973,6 +5345,17 @@ static void OPENGL_SetIndexBufferData(
 		(GLsizeiptr) dataLength,
 		data
 	);
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfSubDataWrites += 1;
+		renderer->perfSubDataBytes += dataLength;
+		renderer->perfTotalSubDataWrites += 1;
+		renderer->perfTotalSubDataBytes += dataLength;
+		renderer->perfIndexUploadCalls += 1;
+		renderer->perfIndexUploadBytes += dataLength;
+		renderer->perfTotalIndexUploadCalls += 1;
+		renderer->perfTotalIndexUploadBytes += dataLength;
+	}
 }
 
 static void OPENGL_GetIndexBufferData(
@@ -5235,6 +5618,12 @@ static void OPENGL_ApplyEffect(
 	MOJOSHADER_effect *effectData = fnaEffect->effect;
 	const MOJOSHADER_effectTechnique *technique = fnaEffect->effect->current_technique;
 	uint32_t whatever;
+
+	if (renderer->perfDiagnosticsEnabled)
+	{
+		renderer->perfApplyEffectCalls += 1;
+		renderer->perfTotalApplyEffectCalls += 1;
+	}
 
 	renderer->effectApplied = 1;
 	if (effectData == renderer->currentEffect)
@@ -6143,6 +6532,73 @@ FNA3D_Device* OPENGL_CreateDevice(
 	{
 		renderer->supports_ARB_map_buffer_range = 0;
 		FNA3D_LogInfo("glMapBufferRange optimization disabled via FNA3D_OPENGL_USE_MAP_BUFFER_RANGE=0");
+	}
+
+	/* Runtime diagnostics for FPS overlay */
+	{
+		const char *perfDiagnosticsStr = SDL_getenv("RAL_GL_DIAGNOSTICS");
+		renderer->perfDiagnosticsEnabled =
+			(perfDiagnosticsStr != NULL && SDL_strcmp(perfDiagnosticsStr, "1") == 0);
+		renderer->perfPublishTimestamp = 0;
+		renderer->perfMapWrites = 0;
+		renderer->perfMapBytes = 0;
+		renderer->perfSubDataWrites = 0;
+		renderer->perfSubDataBytes = 0;
+		renderer->perfDrawCalls = 0;
+		renderer->perfFrameCount = 0;
+		renderer->perfSwapWaitNs = 0;
+		renderer->perfSleepNs = 0;
+		renderer->perfDrawIndexedCalls = 0;
+		renderer->perfDrawInstancedCalls = 0;
+		renderer->perfDrawPrimitiveCalls = 0;
+		renderer->perfClearCalls = 0;
+		renderer->perfSetRenderTargetCalls = 0;
+		renderer->perfApplyEffectCalls = 0;
+		renderer->perfVertexUploadCalls = 0;
+		renderer->perfIndexUploadCalls = 0;
+		renderer->perfVertexUploadBytes = 0;
+		renderer->perfIndexUploadBytes = 0;
+		renderer->perfTotalMapWrites = 0;
+		renderer->perfTotalMapBytes = 0;
+		renderer->perfTotalSubDataWrites = 0;
+		renderer->perfTotalSubDataBytes = 0;
+		renderer->perfTotalDrawCalls = 0;
+		renderer->perfTotalFrameCount = 0;
+		renderer->perfTotalDrawIndexedCalls = 0;
+		renderer->perfTotalDrawInstancedCalls = 0;
+		renderer->perfTotalDrawPrimitiveCalls = 0;
+		renderer->perfTotalClearCalls = 0;
+		renderer->perfTotalSetRenderTargetCalls = 0;
+		renderer->perfTotalApplyEffectCalls = 0;
+		renderer->perfTotalVertexUploadCalls = 0;
+		renderer->perfTotalIndexUploadCalls = 0;
+		renderer->perfTotalVertexUploadBytes = 0;
+		renderer->perfTotalIndexUploadBytes = 0;
+
+		if (renderer->perfDiagnosticsEnabled)
+		{
+			SDL_setenv("RAL_GL_MAP_ENABLED", renderer->supports_ARB_map_buffer_range ? "1" : "0", 1);
+			SDL_setenv("RAL_GL_UPLOAD_PATH", renderer->supports_ARB_map_buffer_range ? "MapBufferRange" : "BufferSubData", 1);
+			SDL_setenv("RAL_GL_MAP_WRITES_S", "0", 1);
+			SDL_setenv("RAL_GL_SUBDATA_WRITES_S", "0", 1);
+			SDL_setenv("RAL_GL_DRAW_S", "0", 1);
+			SDL_setenv("RAL_GL_UPLOAD_MB_S", "0", 1);
+			SDL_setenv("RAL_GL_DRAWS_FRAME", "0", 1);
+			SDL_setenv("RAL_GL_FRAME_MS", "0", 1);
+			SDL_setenv("RAL_GL_SWAP_MS", "0", 1);
+			SDL_setenv("RAL_GL_SLEEP_MS", "0", 1);
+			SDL_setenv("RAL_GL_MAP_RATIO", renderer->supports_ARB_map_buffer_range ? "100" : "0", 1);
+			SDL_setenv("RAL_GL_DIAG", "Collecting...", 1);
+			SDL_setenv("RAL_GL_TIMING", "Collecting frame timing...", 1);
+			SDL_setenv("RAL_GL_COUNT_W", "Collecting window counts...", 1);
+			SDL_setenv("RAL_GL_UPLOAD_W", "Collecting window uploads...", 1);
+			SDL_setenv("RAL_GL_COUNT_T", "T D 0 CL 0 RT 0 FX 0", 1);
+			SDL_setenv("RAL_GL_UPLOAD_T", "T MAP 0 SUB 0 VB 0/0.0MB IB 0/0.0MB", 1);
+			SDL_setenv("RAL_GL_PATH", renderer->supports_ARB_map_buffer_range ?
+				"Path MapBufferRange (warming up)" :
+				"Path BufferSubData (warming up)", 1);
+			FNA3D_LogInfo("Runtime GL diagnostics enabled (RAL_GL_DIAGNOSTICS=1)");
+		}
 	}
 
 	/* Quality Settings - Read from environment variables */
