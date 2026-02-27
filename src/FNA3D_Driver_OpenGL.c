@@ -5040,22 +5040,13 @@ static void OPENGL_SetVertexBufferData(
 
 		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
-			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL)
-			 * 这避免了额外的内存分配和 GPU 同步 */
-			if (offsetInBytes == 0 && dataLength >= glBuffer->size)
-			{
-				/* 完全覆盖整个缓冲区 */
-				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
-			}
-			else
-			{
-				/* 只覆盖部分区域 */
-				mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
-			}
+            // when discarding, we don't care about the existing buffer contents, so we can invalidate the entire buffer
+            mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
 		}
 		else if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
 		{
-			/* 不覆盖现有数据，使用无同步映射 */
+            // NEVER ADD THIS SHIT AGAIN, IT CAUSES HORRIBLE PERFORMANCE ON ANDROID DEVICES
+            // mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
 			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
 		}
 
@@ -5287,18 +5278,13 @@ static void OPENGL_SetIndexBufferData(
 
 		if (options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
-			/* GLES3 优化: 使用 INVALIDATE_BUFFER 而不是 glBufferData(NULL) */
-			if (offsetInBytes == 0 && dataLength >= glBuffer->size)
-			{
-				mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
-			}
-			else
-			{
-				mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
-			}
+            // when discarding, we don't care about the existing buffer contents, so we can invalidate the entire buffer
+            mapFlags |= GL_MAP_INVALIDATE_BUFFER_BIT;
 		}
 		else if (options == FNA3D_SETDATAOPTIONS_NOOVERWRITE)
 		{
+            // NEVER ADD THIS SHIT AGAIN, IT CAUSES HORRIBLE PERFORMANCE ON ANDROID DEVICES
+            // mapFlags |= GL_MAP_INVALIDATE_RANGE_BIT;
 			mapFlags |= GL_MAP_UNSYNCHRONIZED_BIT;
 		}
 
