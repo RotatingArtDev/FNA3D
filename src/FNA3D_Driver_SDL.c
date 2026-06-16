@@ -33,6 +33,8 @@
 
 #define MAX_FRAMES_IN_FLIGHT 3
 #define MAX_UPLOAD_CYCLE_COUNT 4
+#define RAL_FPS_SAMPLE_COUNT 5
+#define RAL_FPS_UPDATE_INTERVAL_SECONDS 0.1
 
 /* Transfer buffer size - 可通过环境变量调整
  * 移动设备建议: 8 MiB (内存受限)
@@ -659,7 +661,102 @@ typedef struct SDLGPU_Renderer
 	uint8_t supportsD24;
 	uint8_t supportsD24S8;
 
+	/* RAL FPS overlay */
+	uint64_t ralFrameTimes[RAL_FPS_SAMPLE_COUNT];
+	int32_t ralFrameIndex;
+	int32_t ralFrameCount;
+	uint64_t ralLastUpdate;
+	double ralFpsSmoothed;
+	double ralFrameTimeMs;
+	uint8_t ralFpsInitialized;
+
 } SDLGPU_Renderer;
+
+static void SDLGPU_INTERNAL_InitFPSTracking(
+	SDLGPU_Renderer *renderer
+) {
+	if (renderer->ralFpsInitialized)
+	{
+		return;
+	}
+
+	renderer->ralFpsInitialized = 1;
+	SDL_memset(renderer->ralFrameTimes, '\0', sizeof(renderer->ralFrameTimes));
+	renderer->ralFrameIndex = 0;
+	renderer->ralFrameCount = 0;
+	renderer->ralLastUpdate = SDL_GetPerformanceCounter();
+	renderer->ralFpsSmoothed = 0.0;
+	renderer->ralFrameTimeMs = 0.0;
+	SDL_setenv_unsafe("RAL_FPS", "0", 1);
+	SDL_setenv_unsafe("RAL_FRAME_TIME", "0", 1);
+	SDL_setenv_unsafe("RALCORE_FPS", "0", 1);
+}
+
+static void SDLGPU_INTERNAL_UpdateFPS(
+	SDLGPU_Renderer *renderer
+) {
+	uint64_t currentTime;
+	uint64_t elapsedTime;
+	uint64_t frequency;
+	double elapsedSeconds;
+	char buffer[64];
+
+	SDLGPU_INTERNAL_InitFPSTracking(renderer);
+
+	currentTime = SDL_GetPerformanceCounter();
+	frequency = SDL_GetPerformanceFrequency();
+	if (frequency == 0)
+	{
+		return;
+	}
+
+	renderer->ralFrameTimes[renderer->ralFrameIndex] = currentTime;
+	renderer->ralFrameIndex = (renderer->ralFrameIndex + 1) % RAL_FPS_SAMPLE_COUNT;
+	if (renderer->ralFrameCount < RAL_FPS_SAMPLE_COUNT)
+	{
+		renderer->ralFrameCount += 1;
+	}
+
+	elapsedTime = currentTime - renderer->ralLastUpdate;
+	elapsedSeconds = (double) elapsedTime / (double) frequency;
+	if (elapsedSeconds < RAL_FPS_UPDATE_INTERVAL_SECONDS)
+	{
+		return;
+	}
+	renderer->ralLastUpdate = currentTime;
+
+	if (renderer->ralFrameCount >= 2)
+	{
+		int32_t oldestIndex;
+		int32_t newestIndex;
+		uint64_t oldestTime;
+		uint64_t newestTime;
+
+		oldestIndex = (renderer->ralFrameIndex - renderer->ralFrameCount + RAL_FPS_SAMPLE_COUNT) % RAL_FPS_SAMPLE_COUNT;
+		newestIndex = (renderer->ralFrameIndex - 1 + RAL_FPS_SAMPLE_COUNT) % RAL_FPS_SAMPLE_COUNT;
+		oldestTime = renderer->ralFrameTimes[oldestIndex];
+		newestTime = renderer->ralFrameTimes[newestIndex];
+
+		if (newestTime > oldestTime)
+		{
+			uint64_t windowDuration = newestTime - oldestTime;
+			int32_t frameIntervals = renderer->ralFrameCount - 1;
+			double fpsCurrent = ((double) frameIntervals * (double) frequency) / (double) windowDuration;
+
+			renderer->ralFrameTimeMs = ((double) windowDuration * 1000.0) / ((double) frameIntervals * (double) frequency);
+			renderer->ralFpsSmoothed = (renderer->ralFpsSmoothed <= 0.0) ?
+				fpsCurrent :
+				(renderer->ralFpsSmoothed * 0.5 + fpsCurrent * 0.5);
+		}
+	}
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.1f", renderer->ralFpsSmoothed);
+	SDL_setenv_unsafe("RAL_FPS", buffer, 1);
+	SDL_setenv_unsafe("RALCORE_FPS", buffer, 1);
+
+	SDL_snprintf(buffer, sizeof(buffer), "%.2f", renderer->ralFrameTimeMs);
+	SDL_setenv_unsafe("RAL_FRAME_TIME", buffer, 1);
+}
 
 /* Format Conversion */
 
@@ -1129,6 +1226,7 @@ static void SDLGPU_SwapBuffers(
 	SDL_GPUBlitInfo blitInfo;
 	uint32_t width, height;
 	uint32_t i;
+	uint8_t didPresent = 0;
 
 	SDL_LockMutex(renderer->copyPassMutex);
 	SDLGPU_INTERNAL_EndCopyPass(renderer);
@@ -1200,9 +1298,14 @@ static void SDLGPU_SwapBuffers(
 			renderer->renderCommandBuffer,
 			&blitInfo
 		);
+		didPresent = 1;
 	}
 
 	SDLGPU_INTERNAL_FlushCommands(renderer);
+	if (didPresent)
+	{
+		SDLGPU_INTERNAL_UpdateFPS(renderer);
+	}
 
 	/* Reset bound RT state */
 	for (i = 0; i < renderer->boundRenderTargetCount; i += 1)
@@ -4331,6 +4434,7 @@ static FNA3D_Device* SDLGPU_CreateDevice(
 
 	renderer->device = device;
 	renderer->copyPassMutex = SDL_CreateMutex();
+	SDLGPU_INTERNAL_InitFPSTracking(renderer);
 
 	result->driverData = (FNA3D_Renderer*) renderer;
 
