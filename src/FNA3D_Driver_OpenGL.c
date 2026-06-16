@@ -31,6 +31,7 @@
 
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
+#define SDL_setenv SDL_setenv_unsafe
 #else
 #include <SDL.h>
 static inline SDL_threadID SDL_GetCurrentThreadID()
